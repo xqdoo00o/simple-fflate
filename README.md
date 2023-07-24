@@ -1,2 +1,2 @@
 # simple-fflate
-Part of fflate. Just deflateSync &amp; inflateSync.
+Part of [fflate](https://github.com/101arrowz/fflate). Just deflateSync & inflateSync.

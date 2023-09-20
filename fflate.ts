@@ -135,9 +135,7 @@ const slc = (v: Uint8Array, s: number, e?: number) => {
     if (s == null || s < 0) s = 0;
     if (e == null || e > v.length) e = v.length;
     // can't use .constructor in case user-supplied
-    const n = new u8(e - s);
-    n.set(v.subarray(s, e));
-    return n;
+    return new u8(v.subarray(s, e));
 }
 
 // inflate state
@@ -202,12 +200,13 @@ const inflt = (dat: Uint8Array, st: InflateState, buf?: Uint8Array, dict?: Uint8
     // source length       dict length
     const sl = dat.length, dl = dict ? dict.length : 0;
     if (!sl || st.f && !st.l) return buf || new u8(0);
+    const noBuf = !buf;
     // have to estimate size
-    const noBuf = !buf || st.i != 2;
+    const resize = noBuf || st.i != 2;
     // no state
     const noSt = st.i;
     // Assumes roughly 33% compression ratio average
-    if (!buf) buf = new u8(sl * 3);
+    if (noBuf) buf = new u8(sl * 3);
     // ensure buffer can fit at least l elements
     const cbuf = (l: number) => {
         let bl = buf.length;
@@ -238,7 +237,7 @@ const inflt = (dat: Uint8Array, st: InflateState, buf?: Uint8Array, dict?: Uint8
                     break;
                 }
                 // ensure size
-                if (noBuf) cbuf(bt + l);
+                if (resize) cbuf(bt + l);
                 // Copy over uncompressed data
                 buf.set(dat.subarray(s, t), bt);
                 // Get new bitpos, update byte count
@@ -298,7 +297,7 @@ const inflt = (dat: Uint8Array, st: InflateState, buf?: Uint8Array, dict?: Uint8
         }
         // Make sure the buffer can hold this + the largest possible addition
         // Maximum chunk size (practically, theoretically infinite) is 2^17
-        if (noBuf) cbuf(bt + 131072);
+        if (resize) cbuf(bt + 131072);
         const lms = (1 << lbt) - 1, dms = (1 << dbt) - 1;
         let lpos = pos;
         for (; ; lpos = pos) {
@@ -336,26 +335,21 @@ const inflt = (dat: Uint8Array, st: InflateState, buf?: Uint8Array, dict?: Uint8
                     if (noSt) err(0);
                     break;
                 }
-                if (noBuf) cbuf(bt + 131072);
+                if (resize) cbuf(bt + 131072);
                 const end = bt + add;
                 if (bt < dt) {
                     const shift = dl - dt, dend = Math.min(dt, end);
                     if (shift + bt < 0) err(3);
                     for (; bt < dend; ++bt) buf[bt] = dict[shift + bt];
                 }
-                for (; bt < end; bt += 4) {
-                    buf[bt] = buf[bt - dt];
-                    buf[bt + 1] = buf[bt + 1 - dt];
-                    buf[bt + 2] = buf[bt + 2 - dt];
-                    buf[bt + 3] = buf[bt + 3 - dt];
-                }
-                bt = end;
+                for (; bt < end; ++bt) buf[bt] = buf[bt - dt];
             }
         }
         st.l = lm, st.p = lpos, st.b = bt, st.f = final;
         if (lm) final = 1, st.m = lbt, st.d = dm, st.n = dbt;
     } while (!final)
-    return bt == buf.length ? buf : slc(buf, 0, bt);
+    // don't reallocate for streams or user buffers
+    return bt != buf.length && noBuf ? slc(buf, 0, bt) : buf.subarray(0, bt);
 }
 
 // starting at p, write the minimum number of bits that can hold v to d
@@ -736,6 +730,8 @@ interface InflateStreamOptions {
 interface InflateOptions extends InflateStreamOptions {
     /**
      * The buffer into which to write the decompressed data. Saves memory if you know the decompressed size in advance.
+     *
+     * Note that if the decompression result is larger than the size of this buffer, it will be truncated to fit.
      */
     out?: Uint8Array;
 }
